@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import JSONResponse
 import pandas as pd
 from pathlib import Path
+from fastapi.responses import JSONResponse, Response
 
 CSV_PATH = Path(__file__).with_name("ranking_completo.csv")
 
@@ -14,11 +14,12 @@ except FileNotFoundError as e:
 # (Opcional) já ordena pela sua métrica principal
 df = df.sort_values("NOTA_FINAL", ascending=False).reset_index(drop=True)
 
-app = FastAPI(
-    title="Ranking API",
-    version="0.1.0",
-    description="API REST para expor o ranking completo."
-)
+app = FastAPI(title="Ranking API", version="0.1.0")
+
+@app.head("/")          # Render envia HEAD; devolvemos 200
+@app.get("/", tags=["health"])
+def healthcheck():
+    return JSONResponse({"status": "ok"})
 
 @app.get("/ranking")
 def read_ranking(
