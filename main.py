@@ -1,16 +1,19 @@
 from pathlib import Path
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
-import numpy as np
 
-# ────────────────── CARREGAMENTO DE DADOS ────────────────── #
-CSV_PATH   = Path(__file__).with_name("ranking_completo.csv")
-TEAMS_PATH = Path(__file__).with_name("teams.xlsx")
+# ────────────────── CAMINHOS DE ARQUIVO ────────────────── #
+BASE = Path(__file__).parent
+CSV_PATH      = BASE / "ranking_completo.csv"
+TEAMS_PATH    = BASE / "teams.xlsx"
+MATCHES_PATH  = BASE / "matches.xlsx"
 
+# ────────────────── CARREGA DADOS ───────────────────────── #
 # Ranking
-df = (
+df_ranking = (
     pd.read_csv(CSV_PATH)
     .sort_values("NOTA_FINAL", ascending=False)
     .reset_index(drop=True)
@@ -23,52 +26,56 @@ try:
 except FileNotFoundError:
     df_times = pd.DataFrame(columns=["team_name", "slug", "org", "icon"])
 
-# ────────────────── FASTAPI ────────────────── #
+# Partidas
+try:
+    df_matches = pd.read_excel(MATCHES_PATH, engine="openpyxl")
+    df_matches = df_matches.loc[:, ~df_matches.columns.str.contains(r"^Unnamed")].reset_index(drop=True)
+except FileNotFoundError:
+    df_matches = pd.DataFrame()
+
+# ───────────────────── FASTAPI ──────────────────────────── #
 app = FastAPI(
     title="Ranking Valorant Universitário",
-    version="1.1.1",
-    description="Ranking + lista de times expostos como API REST."
+    version="1.2.0",
+    description="Ranking, lista de times e partidas expostos como API REST."
 )
 
-# Health-check
+# ── HEALTH-CHECK ───────────────────────────────────────────
 @app.head("/")
 def healthcheck() -> Response:
     return Response(status_code=200)
 
-# Página HTML do ranking
+# ── RAIZ: TABELA HTML DO RANKING ──────────────────────────
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def root_html(
     limit:  int = Query(100, ge=1),
-    offset: int = Query(0,   ge=0)
+    offset: int = Query(0,   ge=0),
 ) -> HTMLResponse:
-    subset = df.iloc[offset : offset + limit]
-    table_html = subset.to_html(
-        index=False,
-        classes="table table-striped table-sm align-middle",
-        border=0,
-        justify="center",
-    )
+    subset = df_ranking.iloc[offset : offset + limit]
+    table = subset.to_html(index=False,
+                           classes="table table-striped table-sm align-middle",
+                           border=0, justify="center")
     html = f"""<!doctype html><html lang="pt-BR"><head>
-        <meta charset="utf-8"><title>Ranking Valorant Universitário</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"></head>
-        <body class="container my-4">
-        <h1 class="mb-4">Ranking Valorant Universitário</h1>
-        {table_html}
-        <p class="text-muted">Mostrando {len(subset)} de {len(df)} times ·
-           <a href="/ranking?limit={limit}&offset={offset}">Ver JSON</a></p>
-        </body></html>"""
+    <meta charset="utf-8"><title>Ranking Valorant Universitário</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head><body class="container my-4">
+    <h1 class="mb-4">Ranking Valorant Universitário</h1>
+    {table}
+    <p class="text-muted">Mostrando {len(subset)} de {len(df_ranking)} times ·
+       <a href="/ranking?limit={limit}&offset={offset}">Ver JSON</a></p>
+    </body></html>"""
     return HTMLResponse(html)
 
-# JSON do ranking
+# ── ENDPOINT /ranking ─────────────────────────────────────
 @app.get("/ranking")
 def read_ranking(
     limit:  int | None = Query(None, ge=1),
     offset: int        = Query(0,    ge=0),
 ):
-    data = df.iloc[offset : offset + limit if limit else None].to_dict("records")
-    return JSONResponse(content=data)
+    data = df_ranking.iloc[offset : offset + limit if limit else None]
+    return JSONResponse(content=jsonable_encoder(data.replace({np.nan: None}).to_dict("records")))
 
-# JSON dos times
+# ── ENDPOINT /times ───────────────────────────────────────
 @app.get("/times")
 def read_times(
     team:   str | None = Query(None, description="Filtro por nome ou slug"),
@@ -78,16 +85,35 @@ def read_times(
 ):
     result = df_times
     if team:
-        mask_name = result["team_name"].str.contains(team, case=False, na=False)
-        mask_slug = result["slug"].str.contains(team, case=False, na=False)
-        result = result[mask_name | mask_slug]
+        m1 = result["team_name"].str.contains(team, case=False, na=False)
+        m2 = result["slug"].str.contains(team, case=False, na=False)
+        result = result[m1 | m2]
     if org:
         result = result[result["org"].str.contains(org, case=False, na=False)]
 
-    # paginação
     result = result.iloc[offset : offset + limit if limit else None]
+    result = result.replace({np.nan: None})
+    return JSONResponse(content=jsonable_encoder(result.to_dict("records")))
 
-    # ─── Substitui NaN/Inf por None ───
-    result_clean = result.replace({np.nan: None, np.inf: None, -np.inf: None})
+# ── ENDPOINT /partidas ────────────────────────────────────
+@app.get("/partidas")
+def read_partidas(
+    team:        str | None = Query(None, description="time presente em team_i ou team_j"),
+    campeonato:  str | None = Query(None, description="filtra pelo campo campeonato"),
+    limit:  int | None = Query(None, ge=1),
+    offset: int        = Query(0,    ge=0),
+):
+    if df_matches.empty:
+        return JSONResponse(content=[])
 
-    return JSONResponse(content=jsonable_encoder(result_clean.to_dict("records")))
+    result = df_matches
+    if team:
+        m1 = result["team_i"].str.contains(team, case=False, na=False)
+        m2 = result["team_j"].str.contains(team, case=False, na=False)
+        result = result[m1 | m2]
+    if campeonato:
+        result = result[result["campeonato"].str.contains(campeonato, case=False, na=False)]
+
+    result = result.iloc[offset : offset + limit if limit else None]
+    result = result.replace({np.nan: None})
+    return JSONResponse(content=jsonable_encoder(result.to_dict("records")))
