@@ -1,5 +1,4 @@
 from pathlib import Path
-
 import pandas as pd
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -17,18 +16,15 @@ df = (
 
 # Times
 try:
-    df_times = (
-        pd.read_excel(TEAMS_PATH, engine="openpyxl")
-        .loc[:, ~df_times.columns.str.contains("^Unnamed")]   # remove colunas vazias
-        .reset_index(drop=True)
-    )
+    df_times = pd.read_excel(TEAMS_PATH, engine="openpyxl")
+    df_times = df_times.loc[:, ~df_times.columns.str.contains(r"^Unnamed")].reset_index(drop=True)
 except FileNotFoundError:
     df_times = pd.DataFrame(columns=["team_name", "slug", "org", "icon"])
 
 # ────────────────── FASTAPI ────────────────── #
 app = FastAPI(
     title="Ranking Valorant Universitário",
-    version="1.1.0",
+    version="1.1.1",
     description="Ranking + lista de times expostos como API REST."
 )
 
@@ -80,8 +76,9 @@ def read_times(
 ):
     result = df_times
     if team:
-        result = result[result["team_name"].str.contains(team, case=False, na=False) |
-                        result["slug"].str.contains(team, case=False, na=False)]
+        mask_name = result["team_name"].str.contains(team, case=False, na=False)
+        mask_slug = result["slug"].str.contains(team, case=False, na=False)
+        result = result[mask_name | mask_slug]
     if org:
         result = result[result["org"].str.contains(org, case=False, na=False)]
     result = result.iloc[offset : offset + limit if limit else None]
