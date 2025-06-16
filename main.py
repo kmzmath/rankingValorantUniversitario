@@ -2,6 +2,8 @@ from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
+import numpy as np
 
 # ────────────────── CARREGAMENTO DE DADOS ────────────────── #
 CSV_PATH   = Path(__file__).with_name("ranking_completo.csv")
@@ -81,5 +83,11 @@ def read_times(
         result = result[mask_name | mask_slug]
     if org:
         result = result[result["org"].str.contains(org, case=False, na=False)]
+
+    # paginação
     result = result.iloc[offset : offset + limit if limit else None]
-    return JSONResponse(content=result.to_dict("records"))
+
+    # ─── Substitui NaN/Inf por None ───
+    result_clean = result.replace({np.nan: None, np.inf: None, -np.inf: None})
+
+    return JSONResponse(content=jsonable_encoder(result_clean.to_dict("records")))
