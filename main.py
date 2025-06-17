@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
+from fastapi.staticfiles import StaticFiles
 
 # ────────────────── CAMINHOS DE ARQUIVO ────────────────── #
 BASE = Path(__file__).parent
@@ -39,6 +40,8 @@ app = FastAPI(
     version="1.2.0",
     description="Ranking, lista de times e partidas expostos como API REST."
 )
+
+app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
 # ── HEALTH-CHECK ───────────────────────────────────────────
 @app.head("/")
